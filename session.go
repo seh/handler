@@ -44,19 +44,19 @@ func extractSession(contextKey interface{}, r *http.Request) (s *sessions.Sessio
 
 type sessionContextKey struct{}
 
-// WithSessionNamed returns an HTTP handler that binds a session with the given name to each
-// submitted request, delegating further request processing to the supplied HTTP handler, which can
-// then retrieve this bound session with either ExtractSession or MustExtractSession. It panics if
-// either the supplied SessionSource or handler is nil. If the SessionSource yields an error instead
-// of a session, it delegates further request processing to the onError handler.
+// WithSession returns an HTTP handler that binds a session with the given name to each submitted
+// request, delegating further request processing to the supplied HTTP handler, which can then
+// retrieve this bound session with either ExtractSession or MustExtractSession. It panics if either
+// the supplied SessionSource or handler is nil. If the SessionSource yields an error instead of a
+// session, it delegates further request processing to the onError handler.
 //
 // Note that even though this bound session has a name, supplied for consumption by the
-// SessionSource, WithSessionNamed binds at most one session to a given request (as an anonymous
+// SessionSource, WithSession binds at most one session to a given request (as an anonymous
 // singleton, shadowing any prior sessions bound similarly), making storage and later retrieval of
 // the session more efficient than the multiple sessions that the similar WithSessionsNamed
 // binds. To bind multiple sessions with different names to a given request, use WithSessionsNamed
 // instead.
-func WithSessionNamed(name string, s SessionSource, h http.Handler, onError func(w http.ResponseWriter, r *http.Request, err error)) http.Handler {
+func WithSession(name string, s SessionSource, h http.Handler, onError func(w http.ResponseWriter, r *http.Request, err error)) http.Handler {
 	if s == nil {
 		panic("no session source supplied")
 	}
@@ -67,13 +67,13 @@ func WithSessionNamed(name string, s SessionSource, h http.Handler, onError func
 }
 
 // ExtractSession retrieves the singular session most recently bound to this request via
-// WithSessionNamed, together with a boolean indicating whether such a session is available.
+// WithSession, together with a boolean indicating whether such a session is available.
 func ExtractSession(r *http.Request) (s *sessions.Session, ok bool) {
 	return extractSession(sessionContextKey{}, r)
 }
 
 // MustExtractSession retrieves the singular session most recently bound to this request via
-// WithSessionNamed, or panics if no such session is available.
+// WithSession, or panics if no such session is available.
 func MustExtractSession(r *http.Request) *sessions.Session {
 	if s, ok := ExtractSession(r); ok {
 		return s
@@ -94,7 +94,7 @@ type namedSessionContextKey string
 // mutate the supplied slice in place. If no names are supplied, it returns the supplied HTTP
 // handler.
 //
-// To bind only a single session to a given request, consider using WithSessionNamed instead.
+// To bind only a single session to a given request, consider using WithSession instead.
 func WithSessionsNamed(names []string, s SessionSource, h http.Handler, onError func(w http.ResponseWriter, r *http.Request, name string, err error)) http.Handler {
 	if s == nil {
 		panic("no session source supplied")

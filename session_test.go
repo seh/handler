@@ -27,7 +27,7 @@ func (f failingSessionSource) New(*http.Request, string) (*sessions.Session, err
 	return nil, f.err
 }
 
-func TestWithSessionNamedPanicsWithNoSource(t *testing.T) {
+func TestWithSessionPanicsWithNoSource(t *testing.T) {
 	delegate := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		t.Error("HTTP handler should not have been called")
 	})
@@ -35,10 +35,10 @@ func TestWithSessionNamedPanicsWithNoSource(t *testing.T) {
 		t.Error("onError handler should not have been called")
 	}
 	defer ensurePanicWithValueOccured(t)
-	handler.WithSessionNamed("s", nil, delegate, onError)
+	handler.WithSession("s", nil, delegate, onError)
 }
 
-func TestWithSessionNamedPanicsWithNoHandler(t *testing.T) {
+func TestWithSessionPanicsWithNoHandler(t *testing.T) {
 	var source countingSessionSource
 	defer func() {
 		if got, want := source.callCount(), uint(0); got != want {
@@ -49,10 +49,10 @@ func TestWithSessionNamedPanicsWithNoHandler(t *testing.T) {
 		t.Error("onError handler should not have been called")
 	}
 	defer ensurePanicWithValueOccured(t)
-	handler.WithSessionNamed("s", &source, nil, onError)
+	handler.WithSession("s", &source, nil, onError)
 }
 
-func TestWithSessionNamedSourceFailure(t *testing.T) {
+func TestWithSessionSourceFailure(t *testing.T) {
 	expectedError := errors.New("")
 	source := failingSessionSource{expectedError}
 	called := false
@@ -63,9 +63,9 @@ func TestWithSessionNamedSourceFailure(t *testing.T) {
 		}
 	}
 	delegate := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
-	handler := handler.WithSessionNamed("s", source, delegate, onError)
+	handler := handler.WithSession("s", source, delegate, onError)
 	if handler == nil {
-		t.Fatal("WithSessionNamed returned nil")
+		t.Fatal("WithSession returned nil")
 	}
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, httptest.NewRequest("", "/", nil))
@@ -101,7 +101,7 @@ func (s countingSessionSource) callCount() uint {
 	return uint(s)
 }
 
-func TestWithSessionNamed(t *testing.T) {
+func TestWithSession(t *testing.T) {
 	onError := func(w http.ResponseWriter, r *http.Request, err error) {
 		t.Error("onError handler called unexpectedly")
 	}
@@ -117,7 +117,7 @@ func TestWithSessionNamed(t *testing.T) {
 			t.Error("extracted session is not new")
 		}
 	})
-	handler := handler.WithSessionNamed("s", &source, delegate, onError)
+	handler := handler.WithSession("s", &source, delegate, onError)
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, httptest.NewRequest("", "/", nil))
 	if !called {
