@@ -5,6 +5,7 @@ package handler_test
 
 import (
 	"errors"
+	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -72,6 +73,31 @@ func TestWithSessionSourceFailure(t *testing.T) {
 	if !called {
 		t.Error("onError handler was not called")
 	}
+}
+
+func ensureResponseIsInternalError(t *testing.T, handler http.Handler) {
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest("", "/", nil))
+	if got, want := recorder.Code, http.StatusInternalServerError; got != want {
+		t.Errorf("status code: got %d, want %d", got, want)
+	}
+	body, err := ioutil.ReadAll(recorder.Body)
+	if err != nil {
+		t.Fatalf("failed to read the response body: %v", err)
+	}
+	if got, want := len(body), 0; got != want {
+		t.Errorf("response body length: got %d, want %d", got, want)
+	}
+}
+
+func TestWithSessionSourceFailureWithNoErrorHandler(t *testing.T) {
+	source := failingSessionSource{errors.New("")}
+	delegate := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
+	handler := handler.WithSession("s", source, delegate, nil)
+	if handler == nil {
+		t.Fatal("WithSession returned nil")
+	}
+	ensureResponseIsInternalError(t, handler)
 }
 
 type simpleStore struct{}
@@ -196,6 +222,16 @@ func TestWithSessionsNamedSourceFailure(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestWithSessionsNamedSourceFailureWithNoErrorHandler(t *testing.T) {
+	source := failingSessionSource{errors.New("")}
+	delegate := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
+	handler := handler.WithSessionsNamed([]string{"s1", "s2"}, source, delegate, nil)
+	if handler == nil {
+		t.Fatal("WithSessionsNamed returned nil")
+	}
+	ensureResponseIsInternalError(t, handler)
 }
 
 func TestWithSessionsNamed(t *testing.T) {

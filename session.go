@@ -42,13 +42,19 @@ func extractSession(contextKey interface{}, r *http.Request) (s *sessions.Sessio
 	return
 }
 
+func sendDefaultResponse(w http.ResponseWriter) {
+	w.WriteHeader(http.StatusInternalServerError)
+}
+
 type sessionContextKey struct{}
 
 // WithSession returns an HTTP handler that binds a session with the given name to each submitted
 // request, delegating further request processing to the supplied HTTP handler, which can then
 // retrieve this bound session with either ExtractSession or MustExtractSession. It panics if either
 // the supplied SessionSource or handler is nil. If the SessionSource yields an error instead of a
-// session, it delegates further request processing to the onError handler.
+// session, it delegates further request processing to the onError handler. If no such onError
+// handler is supplied and an error arises acquiring a session, it will respond with HTTP status
+// code 500 with no body.
 //
 // Note that even though this bound session has a name, supplied for consumption by the
 // SessionSource, WithSession binds at most one session to a given request (as an anonymous
@@ -62,6 +68,9 @@ func WithSession(name string, s SessionSource, h http.Handler, onError func(w ht
 	}
 	if h == nil {
 		panic("no consuming HTTP handler supplied")
+	}
+	if onError == nil {
+		onError = func(w http.ResponseWriter, _ *http.Request, _ error) { sendDefaultResponse(w) }
 	}
 	return makeSingleKeyHandler(name, sessionContextKey{}, s, h, onError)
 }
@@ -88,7 +97,8 @@ type namedSessionContextKey string
 // handler, which can then retrieve these bound sessions with either ExtractSessionNamed or
 // MustExtractSessionNamed. It panics if either the supplied SessionSource or handler is nil. If the
 // SessionSource yields an error instead of a session, it delegates further request processing to
-// the onError handler.
+// the onError handler. If no such onError handler is supplied and an error arises acquiring a
+// session, it will respond with HTTP status code 500 with no body.
 //
 // It reduces the sequence of names supplied to a set, with no duplicate entries, but it does not
 // mutate the supplied slice in place. If no names are supplied, it returns the supplied HTTP
@@ -101,6 +111,9 @@ func WithSessionsNamed(names []string, s SessionSource, h http.Handler, onError 
 	}
 	if h == nil {
 		panic("no consuming HTTP handler supplied")
+	}
+	if onError == nil {
+		onError = func(w http.ResponseWriter, _ *http.Request, _ string, _ error) { sendDefaultResponse(w) }
 	}
 	// If there is more than one name supplied, whittle them down to a set, without bothering to
 	// preserve order.
