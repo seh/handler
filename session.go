@@ -23,7 +23,6 @@ func makeSingleKeyHandler(name string, contextKey interface{}, s SessionSource, 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		session, err := s.New(r, name)
 		if err != nil {
-			// TODO(seh): Consider responding with status code 500 (and no body) if onError is nil.
 			onError(w, r, err)
 			return
 		}
