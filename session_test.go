@@ -20,12 +20,40 @@ func ensurePanicWithValueOccured(t *testing.T) {
 	}
 }
 
+// fakeSecureCookieError is a securecookie.Error that can impersonate a decoding or validation
+// error, depending on whether its underlying value is true or false.
+type fakeSecureCookieError bool
+
+func (fakeSecureCookieError) Error() string {
+	return "fake"
+}
+
+func (fakeSecureCookieError) IsUsage() bool {
+	return false
+}
+
+func (e fakeSecureCookieError) IsDecode() bool {
+	return bool(e)
+}
+
+func (fakeSecureCookieError) IsInternal() bool {
+	return false
+}
+
+func (fakeSecureCookieError) Cause() error {
+	return nil
+}
+
 type failingSessionSource struct {
 	err error
 }
 
 func (f failingSessionSource) New(*http.Request, string) (*sessions.Session, error) {
-	return nil, f.err
+	// The real sessions.Store implementations never return a nil session.
+	s := &sessions.Session{
+		IsNew: true,
+	}
+	return s, f.err
 }
 
 func TestWithSessionPanicsWithNoSource(t *testing.T) {
@@ -54,24 +82,72 @@ func TestWithSessionPanicsWithNoHandler(t *testing.T) {
 }
 
 func TestWithSessionSourceFailure(t *testing.T) {
-	expectedError := errors.New("")
-	source := failingSessionSource{expectedError}
-	called := false
-	onError := func(w http.ResponseWriter, r *http.Request, err error) {
-		called = true
-		if err != expectedError {
-			t.Error("onError handler received wrong error")
-		}
+	tests := []struct {
+		description   string
+		expectedError error
+	}{
+		{"other", errors.New("")},
+		{"non-decode", fakeSecureCookieError(false)},
 	}
-	delegate := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
-	handler := handler.WithSession("s", source, delegate, onError)
-	if handler == nil {
-		t.Fatal("WithSession returned nil")
+	for _, test := range tests {
+		t.Run(test.description, func(t *testing.T) {
+			source := failingSessionSource{test.expectedError}
+			called := false
+			onError := func(w http.ResponseWriter, r *http.Request, err error) {
+				called = true
+				if err != test.expectedError {
+					t.Error("onError handler received wrong error")
+				}
+			}
+			delegate := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
+			handler := handler.WithSession("s", source, delegate, onError)
+			if handler == nil {
+				t.Fatal("WithSession returned nil")
+			}
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, httptest.NewRequest("", "/", nil))
+			if !called {
+				t.Error("onError handler was not called")
+			}
+		})
 	}
-	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, httptest.NewRequest("", "/", nil))
-	if !called {
-		t.Error("onError handler was not called")
+}
+
+func TestWithSessionCookieExtractionError(t *testing.T) {
+	tests := []struct {
+		description   string
+		expectedError error
+	}{
+		{"absent", http.ErrNoCookie},
+		{"invalid", fakeSecureCookieError(true)},
+	}
+	for _, test := range tests {
+		t.Run(test.description, func(t *testing.T) {
+			source := failingSessionSource{test.expectedError}
+			onError := func(w http.ResponseWriter, r *http.Request, err error) {
+				t.Error("onError handler called unexpectedly")
+			}
+			called := false
+			delegate := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				called = true
+				session := handler.MustExtractSession(r)
+				if session == nil {
+					t.Fatal("extracted session was nil")
+				}
+				if !session.IsNew {
+					t.Error("extracted session is not new")
+				}
+			})
+			handler := handler.WithSession("s", source, delegate, onError)
+			if handler == nil {
+				t.Fatal("WithSession returned nil")
+			}
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, httptest.NewRequest("", "/", nil))
+			if !called {
+				t.Error("delegate handler was not called")
+			}
+		})
 	}
 }
 
@@ -192,33 +268,102 @@ func TestWithSessionsNamedPanicsWithNoHandler(t *testing.T) {
 }
 
 func TestWithSessionsNamedSourceFailure(t *testing.T) {
-	expectedError := errors.New("")
-	source := failingSessionSource{expectedError}
-	delegate := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
 	tests := []struct {
-		description string
-		names       []string
+		description   string
+		expectedError error
 	}{
-		{"single", []string{"s"}},
-		{"two unique", []string{"s1", "s"}},
+		{"other", errors.New("")},
+		{"non-decode", fakeSecureCookieError(false)},
 	}
 	for _, test := range tests {
 		t.Run(test.description, func(t *testing.T) {
-			called := false
-			onError := func(w http.ResponseWriter, r *http.Request, name string, err error) {
-				called = true
-				if err != expectedError {
-					t.Error("onError handler received wrong error")
-				}
+			expectedError := test.expectedError
+			source := failingSessionSource{expectedError}
+			delegate := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
+			tests := []struct {
+				description string
+				names       []string
+			}{
+				{"single", []string{"s"}},
+				{"two unique", []string{"s1", "s"}},
 			}
-			handler := handler.WithSessionsNamed(test.names, source, delegate, onError)
-			if handler == nil {
-				t.Fatal("WithSessionsNamed returned nil")
+			for _, test := range tests {
+				t.Run(test.description, func(t *testing.T) {
+					called := false
+					onError := func(w http.ResponseWriter, r *http.Request, name string, err error) {
+						called = true
+						if err != expectedError {
+							t.Error("onError handler received wrong error")
+						}
+					}
+					handler := handler.WithSessionsNamed(test.names, source, delegate, onError)
+					if handler == nil {
+						t.Fatal("WithSessionsNamed returned nil")
+					}
+					recorder := httptest.NewRecorder()
+					handler.ServeHTTP(recorder, httptest.NewRequest("", "/", nil))
+					if !called {
+						t.Error("onError handler was not called")
+					}
+				})
 			}
-			recorder := httptest.NewRecorder()
-			handler.ServeHTTP(recorder, httptest.NewRequest("", "/", nil))
-			if !called {
-				t.Error("onError handler was not called")
+		})
+	}
+}
+
+func TestWithSessionsNamedCookieExtractionError(t *testing.T) {
+	tests := []struct {
+		description   string
+		expectedError error
+	}{
+		{"absent", http.ErrNoCookie},
+		{"invalid", fakeSecureCookieError(true)},
+	}
+	for _, test := range tests {
+		t.Run(test.description, func(t *testing.T) {
+			source := failingSessionSource{test.expectedError}
+			tests := []struct {
+				description   string
+				names         []string
+				distinctCount uint
+			}{
+				{"single", []string{"s"}, 1},
+				{"two unique", []string{"s1", "s2"}, 2},
+			}
+			for _, test := range tests {
+				t.Run(test.description, func(t *testing.T) {
+					onError := func(w http.ResponseWriter, r *http.Request, name string, err error) {
+						t.Error("onError handler called unexpectedly")
+					}
+					called := false
+					delegate := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						called = true
+						uniqueSessions := make(map[*sessions.Session]struct{}, len(test.names))
+						present := struct{}{}
+						for _, name := range test.names {
+							session := handler.MustExtractSessionNamed(name, r)
+							if session == nil {
+								t.Fatalf("extracted session %q was nil", name)
+							}
+							if !session.IsNew {
+								t.Errorf("extracted session %q is not new", name)
+							}
+							uniqueSessions[session] = present
+						}
+						if got, want := uint(len(uniqueSessions)), test.distinctCount; got != want {
+							t.Errorf("unique sessions: got %d, want %d", got, want)
+						}
+					})
+					handler := handler.WithSessionsNamed(test.names, source, delegate, onError)
+					if handler == nil {
+						t.Fatal("WithSessionsNamed returned nil")
+					}
+					recorder := httptest.NewRecorder()
+					handler.ServeHTTP(recorder, httptest.NewRequest("", "/", nil))
+					if !called {
+						t.Error("delegate handler was not called")
+					}
+				})
 			}
 		})
 	}

@@ -7,6 +7,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/gorilla/securecookie"
 	"github.com/gorilla/sessions"
 )
 
@@ -19,11 +20,20 @@ type SessionSource interface {
 	New(r *http.Request, name string) (*sessions.Session, error)
 }
 
+func getValidOrNewSessionFrom(name string, s SessionSource, r *http.Request) (*sessions.Session, error) {
+	session, err := s.New(r, name)
+	if err != nil && err != http.ErrNoCookie {
+		if serr, ok := err.(securecookie.Error); !ok || !serr.IsDecode() {
+			return session, err
+		}
+	}
+	return session, nil
+}
+
 func makeSingleKeyHandler(name string, contextKey interface{}, s SessionSource, h http.Handler, onError func(w http.ResponseWriter, r *http.Request, err error)) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		session, err := s.New(r, name)
+		session, err := getValidOrNewSessionFrom(name, s, r)
 		if err != nil {
-			// TODO(seh): Consider responding with status code 500 (and no body) if onError is nil.
 			onError(w, r, err)
 			return
 		}
@@ -149,7 +159,7 @@ func WithSessionsNamed(names []string, s SessionSource, h http.Handler, onError 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		for _, name := range names {
-			session, err := s.New(r, name)
+			session, err := getValidOrNewSessionFrom(name, s, r)
 			if err != nil {
 				onError(w, r, name, err)
 				return
